@@ -6,10 +6,12 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 # find dependencies
+find_package(Eigen3 REQUIRED)
 find_package(ament_cmake REQUIRED)
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(crazyswarm2_interfaces REQUIRED)
+find_package(motion_capture_tracking_interfaces REQUIRED)
 
 option(USE_PYBIND OFF)
 option(USE_LIBFRANKA OFF)
@@ -21,10 +23,17 @@ add_executable(demo1
 target_link_libraries(demo1
   rai
 )
+ament_target_dependencies(demo1 
+  rclcpp
+  tf2_ros
+  crazyswarm2_interfaces
+  motion_capture_tracking_interfaces
+)
 target_include_directories(demo1 PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/botop/src>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/botop/rai/rai>
+  $<BUILD_INTERFACE:include_directories(${EIGEN3_INCLUDE_DIRS})>
   $<INSTALL_INTERFACE:include>)
 target_compile_features(demo1 PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 

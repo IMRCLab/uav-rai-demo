@@ -1,3 +1,9 @@
+// System
+#include <chrono>
+#include <thread>
+#include <mutex>
+
+// RAI
 #include <BotOp/bot.h>
 #include <BotOp/SequenceController.h>
 #include <KOMO/manipTools.h>
@@ -5,6 +11,18 @@
 #include <Kin/viewer.h>
 
 #include <Kin/F_forces.h>
+
+// ROS
+#include <rclcpp/rclcpp.hpp>
+#include <tf2_eigen/tf2_eigen.h>
+#include <motion_capture_tracking_interfaces/msg/named_pose_array.hpp>
+#include "crazyswarm2_interfaces/msg/full_state.hpp"
+
+using std::placeholders::_1;
+using std::placeholders::_2;
+
+using crazyswarm2_interfaces::msg::FullState;
+using motion_capture_tracking_interfaces::msg::NamedPoseArray;
 
 //===========================================================================
 
@@ -334,8 +352,153 @@ void testDroneRace()
 
 //===========================================================================
 
+class DemoNode : public rclcpp::Node
+{
+public:
+  DemoNode()
+      : rclcpp::Node("demo1")
+  {
+    sub_poses_ = this->create_subscription<NamedPoseArray>(
+        "poses", 1, std::bind(&DemoNode::posesChanged, this, _1));
+
+    pub_full_state_ = this->create_publisher<FullState>("cmd_full_state", 10);
+
+    this->declare_parameter<int>("control_frequency", 100);
+    int f = this->get_parameter("control_frequency").as_int();
+
+    timer_ = this->create_wall_timer(std::chrono::milliseconds(1000 / f), std::bind(&DemoNode::control_loop, this));
+
+    // create a thread that runs the optimization in a loop
+    // This replaces in my understanding the SequenceControllerExperiment class
+    rai_thread_ = std::thread(&DemoNode::rai_thread, this);
+  }
+
+private:
+  void rai_thread()
+  {
+    rai::Configuration C;
+    C.addFile("droneRace.g");
+
+    //-- define constraints
+    KOMO komo;
+    komo.setModel(C, false);
+    komo.setTiming(7., 1, 5., 1);
+    komo.add_qControlObjective({}, 1, 1e-1);
+    komo.addQuaternionNorms();
+    komo.addObjective({1.}, FS_positionDiff, {"drone", "target0"}, OT_eq, {1e1});
+    komo.addObjective({2.}, FS_positionDiff, {"drone", "target1"}, OT_eq, {1e1});
+    komo.addObjective({3.}, FS_positionDiff, {"drone", "target2"}, OT_eq, {1e1});
+    komo.addObjective({4.}, FS_positionDiff, {"drone", "target3"}, OT_eq, {1e1});
+    komo.addObjective({5.}, FS_positionDiff, {"drone", "target0"}, OT_eq, {1e1});
+    komo.addObjective({6.}, FS_positionDiff, {"drone", "target1"}, OT_eq, {1e1});
+    komo.addObjective({7.}, FS_position, {"drone"}, OT_eq, {1e1}, {0, -.5, 1.});
+
+    //-- not yet integrated
+    //SequenceControllerExperiment ex(C, komo);
+    //while(ex.step(komo.objectives));
+
+    //-- manually just optimize once and dump spline
+
+    //optimize keyframes
+    komo.optimize();
+    // komo.getReport(true);
+    // komo.view(false, "optimized motion");
+    arr keyframes = komo.getPath_qOrg();
+
+    //optimize timing
+    TimingMPC F(keyframes, 1e0, 10); //last number (ctrlCost) in range [1,10] from fast-slow
+    arr x0 = C["drone"]->getPosition();
+    arr v0 = zeros(3);
+    F.solve(x0, v0);
+
+    //get spline
+    {
+      const std::lock_guard<std::mutex> lock(mutex_spline_);
+      F.getCubicSpline(spline_, x0, v0);
+      spline_start_ = std::chrono::steady_clock::now();
+    }
+
+    // //just sample & dump the spline
+    // for (double t = 0; t < S.times.last(); t += .01)
+    // {
+    //   //time 3-positions 3-velocities
+    //   cout << t << S.eval(t).modRaw() << ' ' << S.eval(t, 1).modRaw() << endl;
+    // }
+  }
+
+  void posesChanged(const NamedPoseArray::SharedPtr msg)
+  {
+    // extract uav position and gate pose
+    for (const auto& pose : msg->poses) {
+      if (pose.name == "gate") {
+        const std::lock_guard<std::mutex> lock(mutex_mocap_);
+        tf2::fromMsg(pose.pose, pose_gate_);
+      } else if (pose.name == "cf3") {
+        const std::lock_guard<std::mutex> lock(mutex_mocap_);
+        tf2::fromMsg(pose.pose.position, position_uav_);
+      }
+    }
+  }
+
+  void control_loop()
+  {
+    // sample spline at current time and compute pos, vel, acc
+    arr pos, vel, acc;
+
+    auto now = std::chrono::steady_clock::now();
+    double t = std::chrono::duration_cast<std::chrono::milliseconds>(now - spline_start_).count() / 1000.0f;
+
+    {
+      const std::lock_guard<std::mutex> lock(mutex_spline_);
+      if (spline_.times.N == 0 || spline_.times.last() < t) {
+        return;
+      }
+      pos = spline_.eval(t);
+      vel = spline_.eval(t, 1);
+      acc = spline_.eval(t, 2);
+    }
+    std::cout << t << std::endl;
+
+    FullState msg;
+    msg.header.frame_id = "world";
+    msg.header.stamp = this->now();
+    msg.pose.position.x    = pos(0);
+    msg.pose.position.y    = pos(1);
+    msg.pose.position.z    = pos(2);
+    msg.twist.linear.x     = vel(0);
+    msg.twist.linear.y     = vel(1);
+    msg.twist.linear.z     = vel(2);
+    msg.acc.x              = acc(0);
+    msg.acc.y              = acc(1);
+    msg.acc.z              = acc(2);
+    msg.pose.orientation.w = 1;
+    msg.pose.orientation.x = 0;
+    msg.pose.orientation.y = 0;
+    msg.pose.orientation.z = 0;
+    msg.twist.angular.x    = 0;
+    msg.twist.angular.y    = 0;
+    msg.twist.angular.z    = 0;
+    pub_full_state_->publish(msg);
+  }
+
+  rclcpp::Publisher<FullState>::SharedPtr pub_full_state_;
+  rclcpp::Subscription<NamedPoseArray>::SharedPtr sub_poses_;
+  rclcpp::TimerBase::SharedPtr timer_;
+  std::thread rai_thread_;
+
+  Eigen::Affine3d pose_gate_;
+  Eigen::Vector3d position_uav_;
+  std::mutex mutex_mocap_; // protects pose_gate_ and position_uav_
+  rai::CubicSpline spline_;
+  std::chrono::steady_clock::time_point spline_start_;
+  std::mutex mutex_spline_; // protects spline_ and spline_start_
+};
+
+//===========================================================================
+
 int main(int argc, char *argv[])
 {
+  rclcpp::init(argc, argv);
   rai::initCmdLine(argc, argv);
 
   //  rnd.clockSeed();
@@ -345,7 +508,10 @@ int main(int argc, char *argv[])
   //testBallReaching();
   //testPnp();
   //testPushing();
-  testDroneRace();
+  // testDroneRace();
+
+  rclcpp::spin(std::make_shared<DemoNode>());
+  rclcpp::shutdown();
 
   LOG(0) << " === bye bye ===\n used parameters:\n"
          << rai::getParameters()() << '\n';
