@@ -1,0 +1,3 @@
+[submodule "uav-rai-demo/deps/botop"]
+	path = uav-rai-demo/deps/botop
+	url = https://github.com/MarcToussaint/botop

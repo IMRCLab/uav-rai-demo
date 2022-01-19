@@ -11,9 +11,20 @@ find_package(ament_cmake REQUIRED)
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
 
-add_executable(demo1 src/demo1.cpp)
+option(USE_PYBIND OFF)
+option(USE_LIBFRANKA OFF)
+add_subdirectory(deps/botop EXCLUDE_FROM_ALL)
+
+add_executable(demo1
+  src/demo1.cpp
+)
+target_link_libraries(demo1
+  rai
+)
 target_include_directories(demo1 PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/botop/src>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/botop/rai/rai>
   $<INSTALL_INTERFACE:include>)
 target_compile_features(demo1 PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 
