@@ -1,2 +1,2 @@
-# uav-komo-demo
-ROS2 Package to connect KOMO and Crazyswarm2
+# uav-rai-demo
+ROS2 Package to connect RAI and Crazyswarm2
