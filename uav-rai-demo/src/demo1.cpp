@@ -17,11 +17,19 @@
 #include <tf2_eigen/tf2_eigen.h>
 #include <motion_capture_tracking_interfaces/msg/named_pose_array.hpp>
 #include "crazyswarm2_interfaces/msg/full_state.hpp"
+#include "crazyswarm2_interfaces/srv/takeoff.hpp"
+#include "crazyswarm2_interfaces/srv/land.hpp"
+#include "crazyswarm2_interfaces/srv/notify_setpoints_stop.hpp"
+
+// #define DISPLAY_ONLY
 
 using std::placeholders::_1;
 using std::placeholders::_2;
 
 using crazyswarm2_interfaces::msg::FullState;
+using crazyswarm2_interfaces::srv::Land;
+using crazyswarm2_interfaces::srv::Takeoff;
+using crazyswarm2_interfaces::srv::NotifySetpointsStop;
 using motion_capture_tracking_interfaces::msg::NamedPoseArray;
 
 //===========================================================================
@@ -361,12 +369,31 @@ public:
     sub_poses_ = this->create_subscription<NamedPoseArray>(
         "poses", 1, std::bind(&DemoNode::posesChanged, this, _1));
 
-    pub_full_state_ = this->create_publisher<FullState>("cmd_full_state", 10);
+    pub_full_state_ = this->create_publisher<FullState>("cf3/cmd_full_state", 10);
+
+    client_takeoff_ = this->create_client<Takeoff>("cf3/takeoff");
+    client_takeoff_->wait_for_service();
+
+    client_land_ = this->create_client<Land>("cf3/land");
+    client_land_->wait_for_service();
+
+    client_notify_setpoints_stop_ = this->create_client<NotifySetpointsStop>("cf3/notify_setpoints_stop");
+    client_notify_setpoints_stop_->wait_for_service();
 
     this->declare_parameter<int>("control_frequency", 100);
     int f = this->get_parameter("control_frequency").as_int();
 
+#ifndef DISPLAY_ONLY
     timer_ = this->create_wall_timer(std::chrono::milliseconds(1000 / f), std::bind(&DemoNode::control_loop, this));
+
+    // Takeoff!
+    auto request = std::make_shared<Takeoff::Request>();
+    request->group_mask = 0;
+    request->height = 0.5;
+    request->duration = rclcpp::Duration::from_seconds(2);
+    client_takeoff_->async_send_request(request);
+    rclcpp::sleep_for(std::chrono::seconds(3));
+#endif
 
     // create a thread that runs the optimization in a loop
     // This replaces in my understanding the SequenceControllerExperiment class
@@ -378,6 +405,20 @@ private:
   {
     rai::Configuration C;
     C.addFile("droneRace.g");
+
+    {
+      const std::lock_guard<std::mutex> lock(mutex_mocap_);
+      C["drone"]->setPosition({position_uav_.x(), position_uav_.y(), position_uav_.z()});
+
+      Eigen::Quaterniond q(pose_gate_.rotation());
+
+      C["target3"]->setPose(rai::Transformation(
+          rai::Vector(pose_gate_.translation().x(),
+                      pose_gate_.translation().y(),
+                      pose_gate_.translation().z()),
+          rai::Quaternion(q.w(), q.x(), q.y(), q.z()
+        )));
+    }
 
     //-- define constraints
     KOMO komo;
@@ -406,7 +447,7 @@ private:
     arr keyframes = komo.getPath_qOrg();
 
     //optimize timing
-    TimingMPC F(keyframes, 1e0, 10); //last number (ctrlCost) in range [1,10] from fast-slow
+    TimingMPC F(keyframes, 1e0, 2); //last number (ctrlCost) in range [1,10] from fast-slow
     arr x0 = C["drone"]->getPosition();
     arr v0 = zeros(3);
     F.solve(x0, v0);
@@ -418,12 +459,14 @@ private:
       spline_start_ = std::chrono::steady_clock::now();
     }
 
-    // //just sample & dump the spline
-    // for (double t = 0; t < S.times.last(); t += .01)
-    // {
-    //   //time 3-positions 3-velocities
-    //   cout << t << S.eval(t).modRaw() << ' ' << S.eval(t, 1).modRaw() << endl;
-    // }
+// #ifdef DISPLAY_ONLY
+    //display
+    rai::Mesh M;
+    M.V = spline_.eval(range(0., spline_.times.last(), 100));
+    M.makeLineStrip();
+    C.gl()->add(M);
+    C.watch(true);
+// #endif
   }
 
   void posesChanged(const NamedPoseArray::SharedPtr msg)
@@ -447,16 +490,39 @@ private:
 
     auto now = std::chrono::steady_clock::now();
     double t = std::chrono::duration_cast<std::chrono::milliseconds>(now - spline_start_).count() / 1000.0f;
+    bool land = false;
 
     {
       const std::lock_guard<std::mutex> lock(mutex_spline_);
-      if (spline_.times.N == 0 || spline_.times.last() < t) {
+      if (spline_.times.N == 0) {
         return;
       }
-      pos = spline_.eval(t);
-      vel = spline_.eval(t, 1);
-      acc = spline_.eval(t, 2);
+      if (spline_.times.last() < t) {
+        land = true;
+      } else {
+        pos = spline_.eval(t);
+        vel = spline_.eval(t, 1);
+        acc = spline_.eval(t, 2);
+      }
     }
+
+    if (land) {
+      auto request1 = std::make_shared<NotifySetpointsStop::Request>();
+      request1->remain_valid_millisecs = 100;
+      request1->group_mask = 0;
+      client_notify_setpoints_stop_->async_send_request(request1);
+
+      auto request2 = std::make_shared<Land::Request>();
+      request2->group_mask = 0;
+      request2->height = 0.0;
+      request2->duration = rclcpp::Duration::from_seconds(3.5);
+      client_land_->async_send_request(request2);
+
+      timer_->cancel();
+
+      return;
+    }
+
     std::cout << t << std::endl;
 
     FullState msg;
@@ -483,6 +549,9 @@ private:
 
   rclcpp::Publisher<FullState>::SharedPtr pub_full_state_;
   rclcpp::Subscription<NamedPoseArray>::SharedPtr sub_poses_;
+  rclcpp::Client<Takeoff>::SharedPtr client_takeoff_;
+  rclcpp::Client<Land>::SharedPtr client_land_;
+  rclcpp::Client<NotifySetpointsStop>::SharedPtr client_notify_setpoints_stop_;
   rclcpp::TimerBase::SharedPtr timer_;
   std::thread rai_thread_;
 
