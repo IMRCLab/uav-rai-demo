@@ -44,48 +44,39 @@ struct SequenceControllerExperiment
 
   std::mutex mutex_C_;
 
-  KOMO *__komo = 0;
-  double timeCost = 1e0, ctrlCost = 1e0;
+  KOMO *__komo=0;
+  double timeCost=1e0, ctrlCost=1e0;
 
-  SequenceControllerExperiment(rai::Configuration &_C, ObjectiveL &phi, double cycleTime = .1)
-      : C(_C),
-        tic(cycleTime)
-  {
+  SequenceControllerExperiment(rai::Configuration& _C, ObjectiveL& phi, double cycleTime=.1)
+    : C(_C),
+      tic(cycleTime)
+      {
   }
 
-  SequenceControllerExperiment(rai::Configuration &_C, KOMO &komo, double cycleTime = .1, double timeCost = 1e1, double ctrlCost = 1e-2)
-      : C(_C),
-        tic(cycleTime),
-        __komo(&komo),
-        timeCost(timeCost), ctrlCost(ctrlCost)
-  {
+  SequenceControllerExperiment(rai::Configuration& _C, KOMO& komo, double cycleTime=.1, double timeCost=1e1, double ctrlCost=1e-2)
+    : C(_C),
+      tic(cycleTime),
+      __komo(&komo),
+      timeCost(timeCost), ctrlCost(ctrlCost){
   }
 
-  bool step(ObjectiveL &phi)
-  {
+  bool step(ObjectiveL& phi){
     stepCount++;
 
     //-- start a robot thread
-    if (!bot)
-    {
+    if(!bot){
       bot = make_unique<BotOp>(C, rai::checkParameter<bool>("real"));
-      const std::lock_guard<std::mutex> lock(mutex_C_);
       bot->home(C);
       bot->setControllerWriteData(1);
-      if (bot->optitrack)
-        bot->optitrack->pull(C);
+      if(bot->optitrack) bot->optitrack->pull(C);
       rai::wait(.2);
     }
 
-    if (!ctrl)
-    {
+    if(!ctrl){
       //needs to be done AFTER bot initialization (optitrack..)
-      if (__komo)
-      {
+      if(__komo){
         ctrl = make_unique<SequenceController>(C, *__komo, C.getJointState(), timeCost, ctrlCost);
-      }
-      else
-      {
+      }else{
         ctrl = make_unique<SequenceController>(C, phi, C.getJointState(), timeCost, ctrlCost);
       }
     }
@@ -94,11 +85,10 @@ struct SequenceControllerExperiment
     tic.waitForTic();
 
     //-- get optitrack
-    if (bot->optitrack)
-      bot->optitrack->pull(C);
+    if(bot->optitrack) bot->optitrack->pull(C);
 
     //-- get current state (time,q,qDot)
-    arr q, qDot, q_ref, qDot_ref;
+    arr q,qDot, q_ref, qDot_ref;
     double ctrlTime = 0.;
     bot->getState(q, qDot, ctrlTime);
     bot->getReference(q_ref, qDot_ref, NoArr, q, qDot, ctrlTime);
@@ -110,18 +100,16 @@ struct SequenceControllerExperiment
       ctrl->report(C, phi);
     }
 
-    //-- send leap target
+    //-- send spline update
     auto sp = ctrl->getSpline(bot->get_t());
-    if (sp.pts.N)
-      bot->move(sp.pts, sp.vels, sp.times, true);
+    if(sp.pts.N) bot->move(sp.pts, sp.vels, sp.times, true);
 
     //-- update C
     {
       const std::lock_guard<std::mutex> lock(mutex_C_);
       bot->step(C, .0);
     }
-    if (bot->keypressed == 'q' || bot->keypressed == 27)
-      return false;
+    if(bot->keypressed=='q' || bot->keypressed==27) return false;
 
     return true;
   }
@@ -135,7 +123,7 @@ public:
   DemoNode()
       : rclcpp::Node("demo1")
   {
-    sub_poses_ = this->create_subscription<NamedPoseArray>(
+    sub_poses_=this->create_subscription<NamedPoseArray>(
         "poses", 1, std::bind(&DemoNode::posesChanged, this, _1));
 
     pub_full_state_ = this->create_publisher<FullState>("cf3/cmd_full_state", 10);
@@ -230,7 +218,7 @@ private:
 
     //-- in analogy to OptiTrack::pull
     {//update the gate
-      const std::lock_guard<std::mutex> lock(mutex_C_);
+      const std::lock_guard<std::mutex> lock(ex->mutex_C_);
       rai::Frame *f = C.getFrame(target1, false); //this needs a mutex!!
       const Eigen::Vector3f& position = pose_gate_.position();
       const Eigen::Quaternionf& rotation = pose_gate_.rotation();
@@ -328,7 +316,6 @@ private:
   Eigen::Affine3d pose_gate_;
   Eigen::Vector3d position_uav_;
   std::mutex mutex_mocap_; // protects pose_gate_ and position_uav_
-  std::mutex mutex_C_; // protects pose_gate_ and position_uav_
   std::chrono::steady_clock::time_point spline_start_;
 };
 
