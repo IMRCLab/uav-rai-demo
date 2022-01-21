@@ -101,188 +101,6 @@ struct SequenceControllerExperiment
 
 //===========================================================================
 
-void testBallFollowing()
-{
-  rai::Configuration C;
-  C.addFile(rai::raiPath("../rai-robotModels/scenarios/pandasTable-calibrated.g"));
-
-  C.addFrame("ball", "table")
-      ->setShape(rai::ST_sphere, {.03})
-      .setColor({1., 0, 0})
-      .setRelativePosition(arr{-.4, .4, .4});
-
-  KOMO komo;
-  komo.setModel(C, false);
-  komo.setTiming(1., 1, 5., 1);
-  komo.add_qControlObjective({}, 1, 1e-1);
-  komo.addQuaternionNorms();
-
-  komo.addObjective({1.}, FS_positionDiff, {"l_gripper", "ball"}, OT_eq, {1e1});
-
-  komo.optimize();
-
-  komo.getReport(true);
-  komo.view(true, "optimized motion");
-  while (komo.view_play(true))
-    ;
-
-  SequenceControllerExperiment ex(C, komo, .02);
-
-  bool useSimulatedBall = !rai::getParameter<bool>("bot/useOptitrack", false);
-  arr ballVel = {.0, .0, .0};
-  arr ballCen = C["ball"]->getPosition();
-
-  while (ex.step(komo.objectives))
-  {
-    if (useSimulatedBall)
-    {
-      if (!(ex.stepCount % 20))
-      {
-        ballVel(0) = .01 * rnd.gauss();
-        ballVel(2) = .01 * rnd.gauss();
-      }
-      if (!(ex.stepCount % 40))
-        ballVel = 0.;
-      arr pos = C["ball"]->getPosition();
-      pos += ballVel;
-      pos = ballCen + .95 * (pos - ballCen);
-      C["ball"]->setPosition(pos);
-    }
-    else
-    {
-      C["ball"]->setPosition(C["HandStick"]->getPosition());
-    }
-  }
-}
-
-//===========================================================================
-
-void testBallReaching()
-{
-  rai::Configuration C;
-  C.addFile(rai::raiPath("../rai-robotModels/scenarios/pandasTable-calibrated.g"));
-
-  C.addFrame("ball", "table")
-      ->setShape(rai::ST_sphere, {.03})
-      .setColor({1., 0, 0})
-      .setRelativePosition(arr{-.4, .4, .4});
-
-  //-- define constraints
-  KOMO komo;
-  komo.setModel(C, false);
-  komo.setTiming(2., 1, 5., 1);
-  komo.add_qControlObjective({}, 1, 1e-1);
-  komo.addQuaternionNorms();
-  komo.addObjective({1.}, FS_positionRel, {"ball", "l_gripper"}, OT_eq, {3e1}, {0., 0., -.1});
-  komo.addObjective({1., 2.}, FS_positionRel, {"ball", "l_gripper"}, OT_eq, {{2, 3}, {1e1, 0, 0, 0, 1e1, 0}});
-  komo.addObjective({2.}, FS_positionDiff, {"l_gripper", "ball"}, OT_eq, {3e1});
-
-  SequenceControllerExperiment ex(C, komo, .02);
-
-  bool useSimulatedBall = !rai::getParameter<bool>("bot/useOptitrack", false);
-  arr ballVel = {.0, .0, .0};
-  arr ballCen = C["ball"]->getPosition();
-
-  while (ex.step(komo.objectives))
-  {
-    if (useSimulatedBall)
-    {
-      if (!(ex.stepCount % 20))
-      {
-        ballVel(0) = .01 * rnd.gauss();
-        ballVel(2) = .01 * rnd.gauss();
-      }
-      if (!(ex.stepCount % 40))
-        ballVel = 0.;
-      arr pos = C["ball"]->getPosition();
-      pos += ballVel;
-      pos = ballCen + .95 * (pos - ballCen);
-      C["ball"]->setPosition(pos);
-    }
-    else
-    {
-      C["ball"]->setPosition(C["HandStick"]->getPosition());
-    }
-  }
-}
-
-//===========================================================================
-
-void testPnp()
-{
-  rai::Configuration C;
-  C.addFile(rai::raiPath("../rai-robotModels/scenarios/pandasTable-calibrated.g"));
-
-  C.addFrame("box", "table")
-      ->setJoint(rai::JT_rigid)
-      .setShape(rai::ST_ssBox, {.06, .15, .09, .01})
-      .setRelativePosition(arr{-.0, -.0, .095});
-
-  C.addFrame("target", "table")
-      ->setJoint(rai::JT_rigid)
-      .setShape(rai::ST_ssBox, {.4, .4, .1, .01})
-      .setRelativePosition(arr{-.4, .2, .0});
-
-  //-- define constraints
-  ObjectiveL phi;
-  addBoxPickObjectives(phi, C, 1., rai::_xAxis, "box", "l_gripper", "l_palm", "target");
-
-  SequenceControllerExperiment ex(C, phi);
-
-  while (ex.step(phi))
-    ;
-}
-
-//===========================================================================
-
-void testPushing()
-{
-  rai::Configuration C;
-  C.addFile("pushScenario.g");
-
-  //-- define constraints
-  ObjectiveL phi;
-  //phi.add({1.}, FS_positionDiff, C, {"stickTip", "puck"}, OT_eq, {1e1});
-  phi.add({1.}, make_shared<F_PushRadiusPrior>(.13), C, {"stickTip", "puck", "target"}, OT_eq, {1e1}, {0., 0., .08});
-  //  phi.add({1.}, FS_positionDiff, C, {"stickTip", "puck"}, OT_eq, {{1,3},{0.,0.,1e1}, {0., 0., .1});
-  phi.add({2.}, make_shared<F_PushRadiusPrior>(.02), C, {"stickTip", "puck", "target"}, OT_eq, {1e1});
-  phi.add({1., 2.}, make_shared<F_PushAligned>(), C, {"stickTip", "puck", "target"}, OT_eq, {{1, 3}, {0, 0, 1e1}});
-  //phi.add({1., 2.}, FS_positionRel, C, {"ball", "l_gripper"}, OT_eq, {{2,3},{1e1,0,0,0,1e1,0}});
-  //phi.add({2.}, FS_positionDiff, C, {"l_gripper", "ball"}, OT_eq, {1e1});
-
-  //  komo.addContact_slide(s.phase0, s.phase1, s.frames(0), s.frames(1));
-  //  if(s.phase1>=s.phase0+.8){
-  //    rai::Frame* obj = komo.world.getFrame(s.frames(1));
-  //    if(!(obj->shape && obj->shape->type()==ST_sphere) && obj->children.N){
-  //      obj = obj->children.last();
-  //    }
-  //    if(obj->shape && obj->shape->type()==ST_sphere){
-  //      double rad = obj->shape->radius();
-  //      arr times = {s.phase0+.2,s.phase1-.2};
-  //      if(komo.k_order==1) times = {s.phase0, s.phase1};
-  //      komo.addObjective(times, make_shared<F_PushRadiusPrior>(rad), s.frames, OT_sos, {1e1}, NoArr, 1, +1, 0);
-  //    }
-  //  }
-  //  if(komo.k_order>1){
-  //    komo.addObjective({s.phase0, s.phase1}, FS_position, {s.frames(1)}, OT_sos, {3e0}, {}, 2); //smooth obj motion
-  //    komo.addObjective({s.phase1}, FS_pose, {s.frames(0)}, OT_eq, {1e0}, {}, 1);
-  //    komo.addObjective({s.phase1}, FS_pose, {s.frames(1)}, OT_eq, {1e0}, {}, 1);
-  //  }
-
-  bool useOptitrack = rai::getParameter<bool>("bot/useOptitrack", false);
-
-  SequenceControllerExperiment ex(C, phi);
-  while (ex.step(phi))
-  {
-    if (useOptitrack)
-    {
-      C["puck"]->setPosition(C["b1"]->getPosition());
-    }
-  }
-}
-
-//===========================================================================
-
 void testDroneRace()
 {
   rai::Configuration C;
@@ -435,38 +253,22 @@ private:
     komo.addObjective({7.}, FS_position, {"drone"}, OT_eq, {1e1}, {0, -.5, 1.});
 
     //-- not yet integrated
-    //SequenceControllerExperiment ex(C, komo);
-    //while(ex.step(komo.objectives));
+    ex = make_unique<SequenceControllerExperiment>(C, komo);
+    while(ex.step(komo.objectives));
 
-    //-- manually just optimize once and dump spline
+    ex = make_unique<SequenceControllerExperiment>(C, komo, .1, 1e0, 1e0);
+    ex->step(komo.objectives);
+    ex.ctrl->tauCutoff = .1;
+    
+    while(ex->step(komo.objectives)){
+      if(ex->ctrl->timingMPC.phase==5){ //hard code endless loop by phase backtracking
+	ex->ctrl->timingMPC.update_setPhase(1);
+      }
 
-    //optimize keyframes
-    komo.optimize();
-    // komo.getReport(true);
-    // komo.view(false, "optimized motion");
-    arr keyframes = komo.getPath_qOrg();
 
-    //optimize timing
-    TimingMPC F(keyframes, 1e0, 2); //last number (ctrlCost) in range [1,10] from fast-slow
-    arr x0 = C["drone"]->getPosition();
-    arr v0 = zeros(3);
-    F.solve(x0, v0);
-
-    //get spline
-    {
-      const std::lock_guard<std::mutex> lock(mutex_spline_);
-      F.getCubicSpline(spline_, x0, v0);
-      spline_start_ = std::chrono::steady_clock::now();
+      //MISSING: update the gates and UAV pose
     }
 
-// #ifdef DISPLAY_ONLY
-    //display
-    rai::Mesh M;
-    M.V = spline_.eval(range(0., spline_.times.last(), 100));
-    M.makeLineStrip();
-    C.gl()->add(M);
-    C.watch(true);
-// #endif
   }
 
   void posesChanged(const NamedPoseArray::SharedPtr msg)
@@ -493,16 +295,10 @@ private:
     bool land = false;
 
     {
-      const std::lock_guard<std::mutex> lock(mutex_spline_);
-      if (spline_.times.N == 0) {
-        return;
-      }
-      if (spline_.times.last() < t) {
+      if (ex->bot->getTimeToEnd()<=0.) {
         land = true;
       } else {
-        pos = spline_.eval(t);
-        vel = spline_.eval(t, 1);
-        acc = spline_.eval(t, 2);
+        ex->bot->getReference(pos, vel, acc, NoArr, NoArr, t); //this is mutex protected!
       }
     }
 
@@ -547,6 +343,8 @@ private:
     pub_full_state_->publish(msg);
   }
 
+  std::unique_ptr<SequenceControllerExperiment> ex;
+  
   rclcpp::Publisher<FullState>::SharedPtr pub_full_state_;
   rclcpp::Subscription<NamedPoseArray>::SharedPtr sub_poses_;
   rclcpp::Client<Takeoff>::SharedPtr client_takeoff_;
@@ -558,9 +356,7 @@ private:
   Eigen::Affine3d pose_gate_;
   Eigen::Vector3d position_uav_;
   std::mutex mutex_mocap_; // protects pose_gate_ and position_uav_
-  rai::CubicSpline spline_;
   std::chrono::steady_clock::time_point spline_start_;
-  std::mutex mutex_spline_; // protects spline_ and spline_start_
 };
 
 //===========================================================================
@@ -572,12 +368,6 @@ int main(int argc, char *argv[])
 
   //  rnd.clockSeed();
   rnd.seed(1);
-
-  //testBallFollowing();
-  //testBallReaching();
-  //testPnp();
-  //testPushing();
-  // testDroneRace();
 
   rclcpp::spin(std::make_shared<DemoNode>());
   rclcpp::shutdown();
