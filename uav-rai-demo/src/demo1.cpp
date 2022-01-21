@@ -228,37 +228,46 @@ private:
 	Q->rot.set(rotation.w(), rotation.vec()(0), rotation.vec()(1), rotation.vec()(2));
       }
     }
-
-    //-- in analogy to Emulator::step
-    {//update the uav
-      auto stateSet = ex->bot->state.set(); //that's a mutex token
-      stateSet->q = {position_uav_(0), position_uav_(1), position_uav_(2)}
-	//TODO!	//stateSet->qDot.resize(qDot_real.N).setZero(); 
-    }
-  }
-
-    }
   }
 
   void control_loop()
   {
-    // sample spline at current time and compute pos, vel, acc
-    arr pos, vel, acc;
 
     auto now = std::chrono::steady_clock::now();
-    double ctrlTime = std::chrono::duration_cast<std::chrono::milliseconds>(now - spline_start_).count() / 1000.0f;
+    ctrlTime_last = ctrlTime;
+    ctrlTime = std::chrono::duration_cast<std::chrono::milliseconds>(now - spline_start_).count() / 1000.0f;
     bool land = false;
-    
+
+    if(!q_real.N) q_real = zeros(3);
+    if(!qDot_real.N) qDot_real = zeros(3);
+
+    {//get position
+      const std::lock_guard<std::mutex> lock(mutex_mocap_);
+      tf2::fromMsg(pose.pose.position, position_uav_);
+      q_last = q_real;
+      q_real = {position_uav_(0), position_uav_(1), position_uav_(2)};
+    }
+
+    //estimate qDot_real
+    double alpha = .1;
+    if(ctrlTime_last>0.){
+      qDot = (1.-alpha)*qDot + alpha*(q_real - q_last)/(ctrlTime - ctrlTime_last);
+    }
+
     {//publish ctrlTime
       auto stateSet = ex->bot->state.set(); //that's a mutex token
       stateSet->ctrlTime=ctrlTime;
+      stateSet->q = q_real;
+      stateSet->qDot = qDot_real;
     }
 
+    // sample spline at current time and compute pos, vel, acc
+    arr pos, vel, acc;
     {
       if (ex->bot->getTimeToEnd()<=0.) {
         land = true;
       } else {
-        ex->bot->getReference(pos, vel, acc, NoArr, NoArr, t); //this is mutex protected!
+        ex->bot->getReference(pos, vel, acc, q_real, qDot_real, ctrlTime); //this is mutex protected!
       }
     }
 
@@ -279,7 +288,7 @@ private:
       return;
     }
 
-    std::cout << t << std::endl;
+    std::cout << ctrlTime << std::endl;
 
     FullState msg;
     msg.header.frame_id = "world";
@@ -317,6 +326,9 @@ private:
   Eigen::Vector3d position_uav_;
   std::mutex mutex_mocap_; // protects pose_gate_ and position_uav_
   std::chrono::steady_clock::time_point spline_start_;
+
+  arr q_real, qDot_real, q_last;
+  double ctrlTime, ctrlTime_last=-1.;
 };
 
 //===========================================================================
