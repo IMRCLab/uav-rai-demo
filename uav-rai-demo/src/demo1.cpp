@@ -43,6 +43,8 @@ struct SequenceControllerExperiment
   Metronome tic;
   uint stepCount = 0;
 
+  std::mutex mutex_C_;
+
   SequenceControllerExperiment(rai::Configuration &_C, ObjectiveL &phi, double cycleTime = .1) : C(_C), tic(cycleTime)
   {
     qHome = C.getJointState();
@@ -63,6 +65,7 @@ struct SequenceControllerExperiment
     if (!bot)
     {
       bot = make_unique<BotOp>(C, rai::checkParameter<bool>("real"));
+      const std::lock_guard<std::mutex> lock(mutex_C_);
       bot->home(C);
       bot->setControllerWriteData(1);
       rai::wait(.2);
@@ -82,8 +85,11 @@ struct SequenceControllerExperiment
     bot->getReference(q_ref, qDot_ref, NoArr, q, qDot, ctrlTime);
 
     //-- iterate MPC
-    ctrl->cycle(C, phi, q_ref, qDot_ref, q, qDot, ctrlTime);
-    ctrl->report(C, phi);
+    {
+      const std::lock_guard<std::mutex> lock(mutex_C_);
+      ctrl->cycle(C, phi, q_ref, qDot_ref, q, qDot, ctrlTime);
+      ctrl->report(C, phi);
+    }
 
     //-- send leap target
     auto sp = ctrl->getSpline(bot->get_t());
@@ -91,7 +97,10 @@ struct SequenceControllerExperiment
       bot->move(sp.pts, sp.vels, sp.times, true);
 
     //-- update C
-    bot->step(C, .0);
+    {
+      const std::lock_guard<std::mutex> lock(mutex_C_);
+      bot->step(C, .0);
+    }
     if (bot->keypressed == 'q' || bot->keypressed == 27)
       return false;
 
@@ -252,10 +261,6 @@ private:
     komo.addObjective({6.}, FS_positionDiff, {"drone", "target1"}, OT_eq, {1e1});
     komo.addObjective({7.}, FS_position, {"drone"}, OT_eq, {1e1}, {0, -.5, 1.});
 
-    //-- not yet integrated
-    ex = make_unique<SequenceControllerExperiment>(C, komo);
-    while(ex.step(komo.objectives));
-
     ex = make_unique<SequenceControllerExperiment>(C, komo, .1, 1e0, 1e0);
     ex->step(komo.objectives);
     ex.ctrl->tauCutoff = .1;
@@ -264,9 +269,6 @@ private:
       if(ex->ctrl->timingMPC.phase==5){ //hard code endless loop by phase backtracking
 	ex->ctrl->timingMPC.update_setPhase(1);
       }
-
-
-      //MISSING: update the gates and UAV pose
     }
 
   }
@@ -283,6 +285,29 @@ private:
         tf2::fromMsg(pose.pose.position, position_uav_);
       }
     }
+
+    //-- in analogy to OptiTrack::pull
+    {//update the gate
+      const std::lock_guard<std::mutex> lock(mutex_C_);
+      rai::Frame *f = C.getFrame(target1, false); //this needs a mutex!!
+      const Eigen::Vector3f& position = pose_gate_.position();
+      const Eigen::Quaternionf& rotation = pose_gate_.rotation();
+      {
+	auto Q = f->set_Q(); //that's not a mutex, by the way, more like a post-change-hook...
+	Q->pos.set(position(0), position(1), position(2));
+	Q->rot.set(rotation.w(), rotation.vec()(0), rotation.vec()(1), rotation.vec()(2));
+      }
+    }
+
+    //-- in analogy to Emulator::step
+    {//update the uav
+      auto stateSet = ex->bot->state.set(); //that's a mutex token
+      stateSet->q = {position_uav_(0), position_uav_(1), position_uav_(2)}
+	//TODO!	//stateSet->qDot.resize(qDot_real.N).setZero(); 
+    }
+  }
+
+    }
   }
 
   void control_loop()
@@ -291,8 +316,13 @@ private:
     arr pos, vel, acc;
 
     auto now = std::chrono::steady_clock::now();
-    double t = std::chrono::duration_cast<std::chrono::milliseconds>(now - spline_start_).count() / 1000.0f;
+    double ctrlTime = std::chrono::duration_cast<std::chrono::milliseconds>(now - spline_start_).count() / 1000.0f;
     bool land = false;
+    
+    {//publish ctrlTime
+      auto stateSet = ex->bot->state.set(); //that's a mutex token
+      stateSet->ctrlTime=ctrlTime;
+    }
 
     {
       if (ex->bot->getTimeToEnd()<=0.) {
@@ -356,6 +386,7 @@ private:
   Eigen::Affine3d pose_gate_;
   Eigen::Vector3d position_uav_;
   std::mutex mutex_mocap_; // protects pose_gate_ and position_uav_
+  std::mutex mutex_C_; // protects pose_gate_ and position_uav_
   std::chrono::steady_clock::time_point spline_start_;
 };
 
