@@ -219,9 +219,9 @@ private:
     //-- in analogy to OptiTrack::pull
     {//update the gate
       const std::lock_guard<std::mutex> lock(ex->mutex_C_);
-      rai::Frame *f = C.getFrame(target1, false); //this needs a mutex!!
-      const Eigen::Vector3f& position = pose_gate_.position();
-      const Eigen::Quaternionf& rotation = pose_gate_.rotation();
+      rai::Frame *f = ex->C.getFrame("target1", false); //this needs a mutex!!
+      const Eigen::Vector3d& position = pose_gate_.translation();
+      const Eigen::Quaterniond rotation(pose_gate_.rotation());
       {
 	auto Q = f->set_Q(); //that's not a mutex, by the way, more like a post-change-hook...
 	Q->pos.set(position(0), position(1), position(2));
@@ -243,7 +243,6 @@ private:
 
     {//get position
       const std::lock_guard<std::mutex> lock(mutex_mocap_);
-      tf2::fromMsg(pose.pose.position, position_uav_);
       q_last = q_real;
       q_real = {position_uav_(0), position_uav_(1), position_uav_(2)};
     }
@@ -251,7 +250,7 @@ private:
     //estimate qDot_real
     double alpha = .1;
     if(ctrlTime_last>0.){
-      qDot = (1.-alpha)*qDot + alpha*(q_real - q_last)/(ctrlTime - ctrlTime_last);
+      qDot_real = (1.-alpha)*qDot_real + alpha*(q_real - q_last)/(ctrlTime - ctrlTime_last);
     }
 
     {//publish ctrlTime
