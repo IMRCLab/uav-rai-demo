@@ -58,6 +58,10 @@ jobs:
           sudo apt update
           sudo apt install -y libusb-1.0-0-dev
 
+      - name: force git to use https rather than ssh
+        run: |
+          git config --global url.https://github.com/.insteadOf ssh://git@github.com/
+
       - uses: actions/checkout@v2
       - name: build and test ROS 2
         uses: ros-tooling/action-ros-ci@v0.2
