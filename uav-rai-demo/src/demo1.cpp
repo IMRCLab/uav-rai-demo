@@ -15,11 +15,13 @@
 // ROS
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_eigen/tf2_eigen.h>
+#include <ament_index_cpp/get_package_share_directory.hpp>
+
 #include <motion_capture_tracking_interfaces/msg/named_pose_array.hpp>
-#include "crazyswarm2_interfaces/msg/full_state.hpp"
-#include "crazyswarm2_interfaces/srv/takeoff.hpp"
-#include "crazyswarm2_interfaces/srv/land.hpp"
-#include "crazyswarm2_interfaces/srv/notify_setpoints_stop.hpp"
+#include <crazyswarm2_interfaces/msg/full_state.hpp>
+#include <crazyswarm2_interfaces/srv/takeoff.hpp>
+#include <crazyswarm2_interfaces/srv/land.hpp>
+#include <crazyswarm2_interfaces/srv/notify_setpoints_stop.hpp>
 
 // #define DISPLAY_ONLY
 
@@ -161,7 +163,10 @@ private:
   void rai_thread()
   {
     rai::Configuration C;
-    C.addFile("droneRace.g");
+
+    std::string package_share_directory = ament_index_cpp::get_package_share_directory("uav-rai-demo");
+    std::string filename_g = package_share_directory + "/droneRace.g";
+    C.addFile(filename_g.c_str());
 
     {
       const std::lock_guard<std::mutex> lock(mutex_mocap_);
@@ -335,6 +340,17 @@ private:
 int main(int argc, char *argv[])
 {
   rclcpp::init(argc, argv);
+
+  // Load our rai.cfg
+  std::string package_share_directory = ament_index_cpp::get_package_share_directory("uav-rai-demo");
+  std::string filename_cfg = package_share_directory + "/rai.cfg";
+  auto P = rai::getParameters();
+  std::ifstream file_cfg(filename_cfg);
+  if(file_cfg.good()) {
+    file_cfg >> P();
+  }
+  file_cfg.close();
+
   rai::initCmdLine(argc, argv);
 
   //  rnd.clockSeed();
