@@ -139,6 +139,9 @@ public:
     client_notify_setpoints_stop_ = this->create_client<NotifySetpointsStop>("cf3/notify_setpoints_stop");
     client_notify_setpoints_stop_->wait_for_service();
 
+    q_real_ = zeros(3);
+    qDot_real_ = zeros(3);
+
     this->declare_parameter<int>("control_frequency", 100);
     int f = this->get_parameter("control_frequency").as_int();
 
@@ -168,19 +171,19 @@ private:
     std::string filename_g = package_share_directory + "/droneRace.g";
     C.addFile(filename_g.c_str());
 
-    {
-      const std::lock_guard<std::mutex> lock(mutex_mocap_);
-      C["drone"]->setPosition({position_uav_.x(), position_uav_.y(), position_uav_.z()});
+    // {
+    //   const std::lock_guard<std::mutex> lock(mutex_mocap_);
+    //   C["drone"]->setPosition({position_uav_.x(), position_uav_.y(), position_uav_.z()});
 
-      Eigen::Quaterniond q(pose_gate_.rotation());
+    //   Eigen::Quaterniond q(pose_gate_.rotation());
 
-      C["target3"]->setPose(rai::Transformation(
-          rai::Vector(pose_gate_.translation().x(),
-                      pose_gate_.translation().y(),
-                      pose_gate_.translation().z()),
-          rai::Quaternion(q.w(), q.x(), q.y(), q.z()
-        )));
-    }
+    //   C["target3"]->setPose(rai::Transformation(
+    //       rai::Vector(pose_gate_.translation().x(),
+    //                   pose_gate_.translation().y(),
+    //                   pose_gate_.translation().z()),
+    //       rai::Quaternion(q.w(), q.x(), q.y(), q.z()
+    //     )));
+    // }
 
     //-- define constraints
     KOMO komo;
@@ -210,72 +213,61 @@ private:
 
   void posesChanged(const NamedPoseArray::SharedPtr msg)
   {
+    static arr q_last;
+    static rclcpp::Time time_last;
+
     // extract uav position and gate pose
     for (const auto& pose : msg->poses) {
       if (pose.name == "gate") {
-        const std::lock_guard<std::mutex> lock(mutex_mocap_);
-        tf2::fromMsg(pose.pose, pose_gate_);
+        const std::lock_guard<std::mutex> lock(ex->mutex_C_);
+
+        rai::Frame *f = ex->C.getFrame("target1", false); //this needs a mutex!!
+        const auto& pos = pose.pose.position;
+        const auto& rot = pose.pose.orientation;
+        auto Q = f->set_Q(); //that's not a mutex, by the way, more like a post-change-hook...
+        Q->pos.set(pos.x, pos.y, pos.z);
+        Q->rot.set(rot.w, rot.x, rot.y, rot.z);
       } else if (pose.name == "cf3") {
         const std::lock_guard<std::mutex> lock(mutex_mocap_);
-        tf2::fromMsg(pose.pose.position, position_uav_);
-      }
-    }
-
-    //-- in analogy to OptiTrack::pull
-    {//update the gate
-      const std::lock_guard<std::mutex> lock(ex->mutex_C_);
-      rai::Frame *f = ex->C.getFrame("target1", false); //this needs a mutex!!
-      const Eigen::Vector3d& position = pose_gate_.translation();
-      const Eigen::Quaterniond rotation(pose_gate_.rotation());
-      {
-	auto Q = f->set_Q(); //that's not a mutex, by the way, more like a post-change-hook...
-	Q->pos.set(position(0), position(1), position(2));
-	Q->rot.set(rotation.w(), rotation.vec()(0), rotation.vec()(1), rotation.vec()(2));
+        q_last = q_real_;
+        q_real_ = {pose.pose.position.x, pose.pose.position.y, pose.pose.position.z};
+        // numerically estimate qDot_real
+        const double alpha = .1;
+        const rclcpp::Time time(msg->header.stamp);
+        if(time_last.nanoseconds() > 0){
+          double dt = (time - time_last).seconds();
+          qDot_real_ = (1.-alpha)*qDot_real_ + alpha*(q_real_ - q_last)/dt;
+        }
+        time_last = time;
       }
     }
   }
 
   void control_loop()
   {
+    // static, so this will only be initialized in the first call
+    static rclcpp::Time start_time = this->now();
 
-    auto now = std::chrono::steady_clock::now();
-    ctrlTime_last = ctrlTime;
-    ctrlTime = std::chrono::duration_cast<std::chrono::milliseconds>(now - spline_start_).count() / 1000.0f;
-    bool land = false;
+    auto now = this->now();
+    double ctrl_time = (now - start_time).seconds();
 
-    if(!q_real.N) q_real = zeros(3);
-    if(!qDot_real.N) qDot_real = zeros(3);
-
-    {//get position
+    arr q_real, qDot_real;
+    {//copy current state, while holding a lock (used multiple times)
       const std::lock_guard<std::mutex> lock(mutex_mocap_);
-      q_last = q_real;
-      q_real = {position_uav_(0), position_uav_(1), position_uav_(2)};
+      q_real = q_real_;
+      qDot_real = qDot_real_;
     }
 
-    //estimate qDot_real
-    double alpha = .1;
-    if(ctrlTime_last>0.){
-      qDot_real = (1.-alpha)*qDot_real + alpha*(q_real - q_last)/(ctrlTime - ctrlTime_last);
-    }
-
-    {//publish ctrlTime
+    {//publish state
       auto stateSet = ex->bot->state.set(); //that's a mutex token
-      stateSet->ctrlTime=ctrlTime;
+      stateSet->ctrlTime=ctrl_time;
       stateSet->q = q_real;
       stateSet->qDot = qDot_real;
     }
 
-    // sample spline at current time and compute pos, vel, acc
-    arr pos, vel, acc;
-    {
-      if (ex->bot->getTimeToEnd()<=0.) {
-        land = true;
-      } else {
-        ex->bot->getReference(pos, vel, acc, q_real, qDot_real, ctrlTime); //this is mutex protected!
-      }
-    }
-
-    if (land) {
+    
+    // land, if there is no valid spline
+    if (ex->bot->getTimeToEnd()<=0.) {
       auto request1 = std::make_shared<NotifySetpointsStop::Request>();
       request1->remain_valid_millisecs = 100;
       request1->group_mask = 0;
@@ -292,7 +284,12 @@ private:
       return;
     }
 
-    std::cout << ctrlTime << std::endl;
+    // everything looks good -> get state
+    // sample spline at current time and compute pos, vel, acc
+    arr pos, vel, acc;
+    ex->bot->getReference(pos, vel, acc, q_real, qDot_real, ctrl_time); //this is mutex protected!
+
+    std::cout << ctrl_time << std::endl;
 
     FullState msg;
     msg.header.frame_id = "world";
@@ -326,13 +323,9 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
   std::thread rai_thread_;
 
-  Eigen::Affine3d pose_gate_;
-  Eigen::Vector3d position_uav_;
-  std::mutex mutex_mocap_; // protects pose_gate_ and position_uav_
-  std::chrono::steady_clock::time_point spline_start_;
-
-  arr q_real, qDot_real, q_last;
-  double ctrlTime, ctrlTime_last=-1.;
+  std::mutex mutex_mocap_; // protects q_real_, qDot_real_
+  arr q_real_;
+  arr qDot_real_;
 };
 
 //===========================================================================
