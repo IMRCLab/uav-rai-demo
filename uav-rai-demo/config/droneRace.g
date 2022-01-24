@@ -1,7 +1,7 @@
 world {}
 
 ## drone
-drone (world) { joint:trans3 X:<t(0 .5 1)> }
+drone (world) { joint:trans3 X:<t(0 -.5 0.5)> }
 
  (drone){ Q:<d(45 0 0 1)> shape:ssBox size:[0.094 0.005 0.005 0.001] color:[.9 .9 .9] mass:0.015}
  (drone){ Q:<d(-45 0 0 1)> shape:ssBox size:[0.094 0.005 0.005 0.001] color:[.9 .9 .9] mass:0.015}

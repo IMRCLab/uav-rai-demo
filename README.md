@@ -12,7 +12,7 @@ git clone https://github.com/IMRCLab/crazyswarm2 --recursive
 git clone --branch ros2 --recursive https://github.com/IMRCLab/motion_capture_tracking.git
 git clone https://github.com/IMRCLab/uav-rai-demo.git
 cd ../
-colcon build --symlink-install
+colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
 Note: symlink-install allows you to edit Python and config files without running `colcon build` every time.
 
@@ -25,5 +25,7 @@ ros2 launch crazyswarm2 launch.py
 In a separate terminal:
 ```
 . install/local_setup.zsh (OR . install/local_setup.bash)
+cd src/uav-rai-demo/uav-rai-demo/config
 ros2 run uav-rai-demo demo1
+(OR: ../../../../install/uav-rai-demo/lib/uav-rai-demo/demo1 to debug)
 ```

@@ -125,6 +125,7 @@ public:
   DemoNode()
       : rclcpp::Node("demo1")
   {
+    std::cout << "Starting demo1 node" << std::endl;
     sub_poses_=this->create_subscription<NamedPoseArray>(
         "poses", 1, std::bind(&DemoNode::posesChanged, this, _1));
 
@@ -141,6 +142,7 @@ public:
 
     q_real_ = zeros(3);
     qDot_real_ = zeros(3);
+    done_ = false;
 
     this->declare_parameter<int>("control_frequency", 100);
     int f = this->get_parameter("control_frequency").as_int();
@@ -167,9 +169,9 @@ private:
   {
     rai::Configuration C;
 
-    std::string package_share_directory = ament_index_cpp::get_package_share_directory("uav-rai-demo");
-    std::string filename_g = package_share_directory + "/droneRace.g";
-    C.addFile(filename_g.c_str());
+    // std::string package_share_directory = ament_index_cpp::get_package_share_directory("uav-rai-demo");
+    // std::string filename_g = package_share_directory + "/droneRace.g";
+    C.addFile("droneRace.g");
 
     // {
     //   const std::lock_guard<std::mutex> lock(mutex_mocap_);
@@ -199,7 +201,7 @@ private:
     komo.addObjective({6.}, FS_positionDiff, {"drone", "target1"}, OT_eq, {1e1});
     komo.addObjective({7.}, FS_position, {"drone"}, OT_eq, {1e1}, {0, -.5, 1.});
 
-    ex = std::make_unique<SequenceControllerExperiment>(C, komo, .1, 1e0, 1e0);
+    ex = std::make_unique<SequenceControllerExperiment>(C, komo, .1, 1e0, 10);
     ex->step(komo.objectives);
     ex->ctrl->tauCutoff = .1;
     
@@ -208,6 +210,8 @@ private:
         ex->ctrl->timingMPC.update_setPhase(1);
       }
     }
+
+    done_ = true;
 
   }
 
@@ -218,7 +222,7 @@ private:
 
     // extract uav position and gate pose
     for (const auto& pose : msg->poses) {
-      if (pose.name == "gate") {
+      if (pose.name == "gate" && ex && !done_) {
         const std::lock_guard<std::mutex> lock(ex->mutex_C_);
 
         rai::Frame *f = ex->C.getFrame("target1", false); //this needs a mutex!!
@@ -250,6 +254,12 @@ private:
 
     auto now = this->now();
     double ctrl_time = (now - start_time).seconds();
+    std::cout << "t= " << ctrl_time << std::endl;
+
+    // do nothing, if RAI isn't ready, yet
+    if (!ex || !ex->bot) {
+      return;
+    }
 
     arr q_real, qDot_real;
     {//copy current state, while holding a lock (used multiple times)
@@ -266,8 +276,14 @@ private:
     }
 
     
-    // land, if there is no valid spline
+    // skip, if there is no valid spline
     if (ex->bot->getTimeToEnd()<=0.) {
+      return;
+    }
+
+    // Land, if the KOMO thread was exited
+    if (done_) {
+      std::cout << "Landing!" << std::endl;
       auto request1 = std::make_shared<NotifySetpointsStop::Request>();
       request1->remain_valid_millisecs = 100;
       request1->group_mask = 0;
@@ -280,7 +296,6 @@ private:
       client_land_->async_send_request(request2);
 
       timer_->cancel();
-
       return;
     }
 
@@ -288,8 +303,6 @@ private:
     // sample spline at current time and compute pos, vel, acc
     arr pos, vel, acc;
     ex->bot->getReference(pos, vel, acc, q_real, qDot_real, ctrl_time); //this is mutex protected!
-
-    std::cout << ctrl_time << std::endl;
 
     FullState msg;
     msg.header.frame_id = "world";
@@ -322,6 +335,7 @@ private:
   rclcpp::Client<NotifySetpointsStop>::SharedPtr client_notify_setpoints_stop_;
   rclcpp::TimerBase::SharedPtr timer_;
   std::thread rai_thread_;
+  bool done_;
 
   std::mutex mutex_mocap_; // protects q_real_, qDot_real_
   arr q_real_;
@@ -333,18 +347,18 @@ private:
 int main(int argc, char *argv[])
 {
   rclcpp::init(argc, argv);
-
-  // Load our rai.cfg
-  std::string package_share_directory = ament_index_cpp::get_package_share_directory("uav-rai-demo");
-  std::string filename_cfg = package_share_directory + "/rai.cfg";
-  auto P = rai::getParameters();
-  std::ifstream file_cfg(filename_cfg);
-  if(file_cfg.good()) {
-    file_cfg >> P();
-  }
-  file_cfg.close();
-
   rai::initCmdLine(argc, argv);
+
+  // // Load our rai.cfg
+  // std::string package_share_directory = ament_index_cpp::get_package_share_directory("uav-rai-demo");
+  // std::string filename_cfg = package_share_directory + "/rai.cfg";
+  // auto P = rai::getParameters();
+  // std::ifstream file_cfg(filename_cfg);
+  // if(file_cfg.good()) {
+  //   file_cfg >> P();
+  // }
+  // file_cfg.close();
+
 
   //  rnd.clockSeed();
   rnd.seed(1);
