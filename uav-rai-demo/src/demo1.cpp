@@ -203,7 +203,7 @@ private:
 #endif
   }
 
-  std::unique_ptr<SequenceControllerExperiment> ex;
+  std::unique_ptr<SecMPC_Experiments> ex;
   
   rclcpp::Publisher<FullState>::SharedPtr pub_full_state_;
   rclcpp::Subscription<NamedPoseArray>::SharedPtr sub_poses_;
@@ -256,7 +256,7 @@ int main(int argc, char *argv[])
   rai::initCmdLine(argc, argv);
   rnd.seed(1);
 
-  std::unique_ptr<SequenceControllerExperiment> ex;
+  std::unique_ptr<SecMPC_Experiments> ex;
 
   ex_droneRace(ex);
 
