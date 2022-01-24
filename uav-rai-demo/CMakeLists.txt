@@ -5,13 +5,21 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+option(MARC_BUILD "build without uav/ros" ON)
+
+if(MARC_BUILD)
+  add_compile_options(-DMARC_BUILD)
+endif()
+
 # find dependencies
 find_package(Eigen3 REQUIRED)
+if(NOT MARC_BUILD)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(crazyswarm2_interfaces REQUIRED)
 find_package(motion_capture_tracking_interfaces REQUIRED)
+endif()
 
 option(USE_PYBIND OFF)
 option(USE_LIBFRANKA OFF)
@@ -19,15 +27,11 @@ add_subdirectory(deps/botop EXCLUDE_FROM_ALL)
 
 add_executable(demo1
   src/demo1.cpp
+  src/ex_droneRace.cpp
+  src/experiment.cpp
 )
 target_link_libraries(demo1
   rai
-)
-ament_target_dependencies(demo1 
-  rclcpp
-  tf2_ros
-  crazyswarm2_interfaces
-  motion_capture_tracking_interfaces
 )
 target_include_directories(demo1 PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -36,6 +40,14 @@ target_include_directories(demo1 PUBLIC
   $<BUILD_INTERFACE:include_directories(${EIGEN3_INCLUDE_DIRS})>
   $<INSTALL_INTERFACE:include>)
 target_compile_features(demo1 PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+
+if(NOT MARC_BUILD)
+ament_target_dependencies(demo1 
+  rclcpp
+  tf2_ros
+  crazyswarm2_interfaces
+  motion_capture_tracking_interfaces
+)
 
 install(TARGETS demo1
   DESTINATION lib/${PROJECT_NAME})
@@ -52,3 +64,4 @@ install(TARGETS demo1
 # endif()
 
 ament_package()
+endif()

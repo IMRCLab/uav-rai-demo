@@ -4,14 +4,10 @@
 #include <mutex>
 
 // RAI
-#include <BotOp/bot.h>
-#include <BotOp/SequenceController.h>
-#include <KOMO/manipTools.h>
-#include <KOMO/pathTools.h>
-#include <Kin/viewer.h>
+#include "experiment.h"
+#include "ex_droneRace.h"
 
-#include <Kin/F_forces.h>
-
+#ifndef MARC_BUILD
 // ROS
 #include <rclcpp/rclcpp.hpp>
 #include <tf2_eigen/tf2_eigen.h>
@@ -36,86 +32,6 @@ using motion_capture_tracking_interfaces::msg::NamedPoseArray;
 
 //===========================================================================
 
-struct SequenceControllerExperiment
-{
-  rai::Configuration &C;
-  unique_ptr<SequenceController> ctrl;
-  unique_ptr<BotOp> bot;
-  Metronome tic;
-  uint stepCount = 0;
-
-  std::mutex mutex_C_;
-
-  KOMO *__komo=0;
-  double timeCost=1e0, ctrlCost=1e0;
-
-  SequenceControllerExperiment(rai::Configuration& _C, ObjectiveL& phi, double cycleTime=.1)
-    : C(_C),
-      tic(cycleTime)
-      {
-  }
-
-  SequenceControllerExperiment(rai::Configuration& _C, KOMO& komo, double cycleTime=.1, double timeCost=1e1, double ctrlCost=1e-2)
-    : C(_C),
-      tic(cycleTime),
-      __komo(&komo),
-      timeCost(timeCost), ctrlCost(ctrlCost){
-  }
-
-  bool step(ObjectiveL& phi){
-    stepCount++;
-
-    //-- start a robot thread
-    if(!bot){
-      bot = make_unique<BotOp>(C, rai::checkParameter<bool>("real"));
-      bot->home(C);
-      bot->setControllerWriteData(1);
-      if(bot->optitrack) bot->optitrack->pull(C);
-      rai::wait(.2);
-    }
-
-    if(!ctrl){
-      //needs to be done AFTER bot initialization (optitrack..)
-      if(__komo){
-        ctrl = make_unique<SequenceController>(C, *__komo, C.getJointState(), timeCost, ctrlCost);
-      }else{
-        ctrl = make_unique<SequenceController>(C, phi, C.getJointState(), timeCost, ctrlCost);
-      }
-    }
-
-    //-- iterate
-    tic.waitForTic();
-
-    //-- get optitrack
-    if(bot->optitrack) bot->optitrack->pull(C);
-
-    //-- get current state (time,q,qDot)
-    arr q,qDot, q_ref, qDot_ref;
-    double ctrlTime = 0.;
-    bot->getState(q, qDot, ctrlTime);
-    bot->getReference(q_ref, qDot_ref, NoArr, q, qDot, ctrlTime);
-
-    //-- iterate MPC
-    {
-      const std::lock_guard<std::mutex> lock(mutex_C_);
-      ctrl->cycle(C, phi, q_ref, qDot_ref, q, qDot, ctrlTime);
-      ctrl->report(C, phi);
-    }
-
-    //-- send spline update
-    auto sp = ctrl->getSpline(bot->get_t());
-    if(sp.pts.N) bot->move(sp.pts, sp.vels, sp.times, true);
-
-    //-- update C
-    {
-      const std::lock_guard<std::mutex> lock(mutex_C_);
-      bot->step(C, .0);
-    }
-    if(bot->keypressed=='q' || bot->keypressed==27) return false;
-
-    return true;
-  }
-};
 
 //===========================================================================
 
@@ -167,53 +83,7 @@ public:
 private:
   void rai_thread()
   {
-    rai::Configuration C;
-
-    // std::string package_share_directory = ament_index_cpp::get_package_share_directory("uav-rai-demo");
-    // std::string filename_g = package_share_directory + "/droneRace.g";
-    C.addFile("droneRace.g");
-
-    // {
-    //   const std::lock_guard<std::mutex> lock(mutex_mocap_);
-    //   C["drone"]->setPosition({position_uav_.x(), position_uav_.y(), position_uav_.z()});
-
-    //   Eigen::Quaterniond q(pose_gate_.rotation());
-
-    //   C["target3"]->setPose(rai::Transformation(
-    //       rai::Vector(pose_gate_.translation().x(),
-    //                   pose_gate_.translation().y(),
-    //                   pose_gate_.translation().z()),
-    //       rai::Quaternion(q.w(), q.x(), q.y(), q.z()
-    //     )));
-    // }
-
-    //-- define constraints
-    KOMO komo;
-    komo.setModel(C, false);
-    komo.setTiming(10., 1, 5., 1);
-    komo.add_qControlObjective({}, 1, 1e-1);
-    komo.addQuaternionNorms();
-    komo.addObjective({1.}, FS_positionDiff, {"drone", "target0_before"}, OT_eq, {1e1});
-    komo.addObjective({2.}, FS_positionDiff, {"drone", "target0_after"}, OT_eq, {1e1});
-    komo.addObjective({3.}, FS_positionDiff, {"drone", "target1_before"}, OT_eq, {1e1});
-    komo.addObjective({4.}, FS_positionDiff, {"drone", "target1_after"}, OT_eq, {1e1});
-    komo.addObjective({5.}, FS_positionDiff, {"drone", "target2_before"}, OT_eq, {1e1});
-    komo.addObjective({6.}, FS_positionDiff, {"drone", "target2_after"}, OT_eq, {1e1});
-    komo.addObjective({7.}, FS_positionDiff, {"drone", "target3_before"}, OT_eq, {1e1});
-    komo.addObjective({8.}, FS_positionDiff, {"drone", "target3_after"}, OT_eq, {1e1});
-    komo.addObjective({9.}, FS_positionDiff, {"drone", "target0_before"}, OT_eq, {1e1});
-    komo.addObjective({10.}, FS_positionDiff, {"drone", "target0_after"}, OT_eq, {1e1});
-
-    ex = std::make_unique<SequenceControllerExperiment>(C, komo, .1, 1e0, 2);
-    ex->step(komo.objectives);
-    ex->ctrl->tauCutoff = .1;
-    
-    while(ex->step(komo.objectives)){
-      if(ex->ctrl->timingMPC.phase==8){ //hard code endless loop by phase backtracking
-        ex->ctrl->timingMPC.update_setPhase(0);
-      }
-    }
-
+    ex_droneRace();
     done_ = true;
 
   }
@@ -378,3 +248,21 @@ int main(int argc, char *argv[])
 
   return 0;
 }
+
+#else
+
+int main(int argc, char *argv[])
+{
+  rai::initCmdLine(argc, argv);
+  rnd.seed(1);
+
+  std::unique_ptr<SequenceControllerExperiment> ex;
+
+  ex_droneRace(ex);
+
+  LOG(0) <<" === bye bye ===\n used parameters:\n" <<rai::getParameters()() <<'\n';
+
+  return 0;
+}
+
+#endif
