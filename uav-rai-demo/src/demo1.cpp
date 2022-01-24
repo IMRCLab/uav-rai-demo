@@ -147,9 +147,9 @@ public:
     this->declare_parameter<int>("control_frequency", 100);
     int f = this->get_parameter("control_frequency").as_int();
 
-#ifndef DISPLAY_ONLY
     timer_ = this->create_wall_timer(std::chrono::milliseconds(1000 / f), std::bind(&DemoNode::control_loop, this));
 
+#ifndef DISPLAY_ONLY
     // Takeoff!
     auto request = std::make_shared<Takeoff::Request>();
     request->group_mask = 0;
@@ -190,24 +190,27 @@ private:
     //-- define constraints
     KOMO komo;
     komo.setModel(C, false);
-    komo.setTiming(7., 1, 5., 1);
+    komo.setTiming(10., 1, 5., 1);
     komo.add_qControlObjective({}, 1, 1e-1);
     komo.addQuaternionNorms();
-    komo.addObjective({1.}, FS_positionDiff, {"drone", "target0"}, OT_eq, {1e1});
-    komo.addObjective({2.}, FS_positionDiff, {"drone", "target1"}, OT_eq, {1e1});
-    komo.addObjective({3.}, FS_positionDiff, {"drone", "target2"}, OT_eq, {1e1});
-    komo.addObjective({4.}, FS_positionDiff, {"drone", "target3"}, OT_eq, {1e1});
-    komo.addObjective({5.}, FS_positionDiff, {"drone", "target0"}, OT_eq, {1e1});
-    komo.addObjective({6.}, FS_positionDiff, {"drone", "target1"}, OT_eq, {1e1});
-    komo.addObjective({7.}, FS_position, {"drone"}, OT_eq, {1e1}, {0, -.5, 1.});
+    komo.addObjective({1.}, FS_positionDiff, {"drone", "target0_before"}, OT_eq, {1e1});
+    komo.addObjective({2.}, FS_positionDiff, {"drone", "target0_after"}, OT_eq, {1e1});
+    komo.addObjective({3.}, FS_positionDiff, {"drone", "target1_before"}, OT_eq, {1e1});
+    komo.addObjective({4.}, FS_positionDiff, {"drone", "target1_after"}, OT_eq, {1e1});
+    komo.addObjective({5.}, FS_positionDiff, {"drone", "target2_before"}, OT_eq, {1e1});
+    komo.addObjective({6.}, FS_positionDiff, {"drone", "target2_after"}, OT_eq, {1e1});
+    komo.addObjective({7.}, FS_positionDiff, {"drone", "target3_before"}, OT_eq, {1e1});
+    komo.addObjective({8.}, FS_positionDiff, {"drone", "target3_after"}, OT_eq, {1e1});
+    komo.addObjective({9.}, FS_positionDiff, {"drone", "target0_before"}, OT_eq, {1e1});
+    komo.addObjective({10.}, FS_positionDiff, {"drone", "target0_after"}, OT_eq, {1e1});
 
-    ex = std::make_unique<SequenceControllerExperiment>(C, komo, .1, 1e0, 10);
+    ex = std::make_unique<SequenceControllerExperiment>(C, komo, .1, 1e0, 2);
     ex->step(komo.objectives);
     ex->ctrl->tauCutoff = .1;
     
     while(ex->step(komo.objectives)){
-      if(ex->ctrl->timingMPC.phase==5){ //hard code endless loop by phase backtracking
-        ex->ctrl->timingMPC.update_setPhase(1);
+      if(ex->ctrl->timingMPC.phase==8){ //hard code endless loop by phase backtracking
+        ex->ctrl->timingMPC.update_setPhase(0);
       }
     }
 
@@ -222,10 +225,10 @@ private:
 
     // extract uav position and gate pose
     for (const auto& pose : msg->poses) {
-      if (pose.name == "gate" && ex && !done_) {
+      if (pose.name.find("target") == 0 && ex && !done_) {
         const std::lock_guard<std::mutex> lock(ex->mutex_C_);
 
-        rai::Frame *f = ex->C.getFrame("target1", false); //this needs a mutex!!
+        rai::Frame *f = ex->C.getFrame(pose.name.c_str(), false); //this needs a mutex!!
         const auto& pos = pose.pose.position;
         const auto& rot = pose.pose.orientation;
         auto Q = f->set_Q(); //that's not a mutex, by the way, more like a post-change-hook...
@@ -284,6 +287,7 @@ private:
     // Land, if the KOMO thread was exited
     if (done_) {
       std::cout << "Landing!" << std::endl;
+#ifndef DISPLAY_ONLY
       auto request1 = std::make_shared<NotifySetpointsStop::Request>();
       request1->remain_valid_millisecs = 100;
       request1->group_mask = 0;
@@ -294,6 +298,7 @@ private:
       request2->height = 0.0;
       request2->duration = rclcpp::Duration::from_seconds(3.5);
       client_land_->async_send_request(request2);
+#endif
 
       timer_->cancel();
       return;
@@ -323,7 +328,9 @@ private:
     msg.twist.angular.x    = 0;
     msg.twist.angular.y    = 0;
     msg.twist.angular.z    = 0;
+#ifndef DISPLAY_ONLY
     pub_full_state_->publish(msg);
+#endif
   }
 
   std::unique_ptr<SequenceControllerExperiment> ex;
