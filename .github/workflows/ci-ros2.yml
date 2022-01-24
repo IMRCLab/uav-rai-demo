@@ -72,3 +72,4 @@ jobs:
           package-name: uav-rai-demo
           target-ros2-distro: ${{ matrix.ros_distribution }}
           vcs-repo-file-url: rosinstall
+          extra-cmake-args: -DCMAKE_BUILD_TYPE=Release -DMARC_BUILD=OFF
