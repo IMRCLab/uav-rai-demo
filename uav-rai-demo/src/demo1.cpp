@@ -83,7 +83,7 @@ public:
 private:
   void rai_thread()
   {
-    ex_droneRace();
+    ex_droneRace(ex);
     done_ = true;
 
   }
