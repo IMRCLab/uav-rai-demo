@@ -14,7 +14,7 @@ bool SecMPC_Experiments::step(){
 
   if(!mpc){
     //needs to be done AFTER bot initialization (optitrack..)
-    mpc = make_unique<SecMPC>(komo, 0, -1, timeCost, ctrlCost);
+    mpc = make_unique<SecMPC>(komo, subSeqStart, subSeqStop, timeCost, ctrlCost, setNextWaypointTangent);
   }
 
   //-- iterate
@@ -50,4 +50,22 @@ bool SecMPC_Experiments::step(){
   if(mpc->timingMPC.done()) return false;
 
   return true;
+}
+
+void SecMPC_Experiments::selectSubSeq(int _subSeqStart, int _subSeqStop){
+  mpc.reset(); //kill the current mpc - created again in next cycle
+  subSeqStart = _subSeqStart;
+  subSeqStop = _subSeqStop;
+}
+
+//===========================================================================
+
+void randomWalkPosition(rai::Frame* f, arr& centerPos, arr& velocity, double rate){
+  arr pos = f->getPosition();
+  if(!centerPos.N) centerPos = pos;
+  if(!velocity.N) velocity = zeros(pos.N);
+  rndGauss(velocity, rate, true);
+  pos += velocity;
+  pos = centerPos + .9 * (pos - centerPos);
+  f->setPosition(pos);
 }
