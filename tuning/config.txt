@@ -21,3 +21,7 @@ ctrlMel.eR_z
 ctrlMel.ew_x
 ctrlMel.ew_y
 ctrlMel.ew_z
+on:estPosition
+locSrv.x
+locSrv.y
+locSrv.z
