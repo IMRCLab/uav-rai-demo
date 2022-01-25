@@ -17,6 +17,7 @@ if(NOT MARC_BUILD)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(rcl_interfaces REQUIRED)
 find_package(crazyswarm2_interfaces REQUIRED)
 find_package(motion_capture_tracking_interfaces REQUIRED)
 endif()
@@ -45,6 +46,7 @@ if(NOT MARC_BUILD)
 ament_target_dependencies(demo1 
   rclcpp
   tf2_ros
+  rcl_interfaces
   crazyswarm2_interfaces
   motion_capture_tracking_interfaces
 )

@@ -13,16 +13,18 @@
 #include <tf2_eigen/tf2_eigen.h>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
+#include <rcl_interfaces/srv/set_parameters.hpp>
+
 #include <motion_capture_tracking_interfaces/msg/named_pose_array.hpp>
 #include <crazyswarm2_interfaces/msg/full_state.hpp>
 #include <crazyswarm2_interfaces/srv/takeoff.hpp>
 #include <crazyswarm2_interfaces/srv/land.hpp>
 #include <crazyswarm2_interfaces/srv/notify_setpoints_stop.hpp>
 
-// #define DISPLAY_ONLY
-
 using std::placeholders::_1;
 using std::placeholders::_2;
+
+using rcl_interfaces::srv::SetParameters;
 
 using crazyswarm2_interfaces::msg::FullState;
 using crazyswarm2_interfaces::srv::Land;
@@ -38,8 +40,9 @@ using motion_capture_tracking_interfaces::msg::NamedPoseArray;
 class DemoNode : public rclcpp::Node
 {
 public:
-  DemoNode()
+  DemoNode(bool display_only)
       : rclcpp::Node("demo1")
+      , display_only_(display_only)
   {
     std::cout << "Starting demo1 node" << std::endl;
     sub_poses_=this->create_subscription<NamedPoseArray>(
@@ -56,6 +59,9 @@ public:
     client_notify_setpoints_stop_ = this->create_client<NotifySetpointsStop>("cf3/notify_setpoints_stop");
     client_notify_setpoints_stop_->wait_for_service();
 
+    client_set_parameters_ = this->create_client<SetParameters>("crazyswarm2_server/set_parameters");
+    client_set_parameters_->wait_for_service();
+
     q_real_ = zeros(3);
     qDot_real_ = zeros(3);
     done_ = false;
@@ -65,15 +71,22 @@ public:
 
     timer_ = this->create_wall_timer(std::chrono::milliseconds(1000 / f), std::bind(&DemoNode::control_loop, this));
 
-#ifndef DISPLAY_ONLY
-    // Takeoff!
-    auto request = std::make_shared<Takeoff::Request>();
-    request->group_mask = 0;
-    request->height = 0.5;
-    request->duration = rclcpp::Duration::from_seconds(2);
-    client_takeoff_->async_send_request(request);
-    rclcpp::sleep_for(std::chrono::seconds(3));
-#endif
+    if (!display_only_) {
+      // Takeoff!
+      auto request = std::make_shared<Takeoff::Request>();
+      request->group_mask = 0;
+      request->height = 0.5;
+      request->duration = rclcpp::Duration::from_seconds(2);
+      client_takeoff_->async_send_request(request);
+      rclcpp::sleep_for(std::chrono::seconds(3));
+
+      auto request2 = std::make_shared<SetParameters::Request>();
+      request2->parameters.resize(1);
+      request2->parameters[0].name = "cf3/params/usd/logging";
+      request2->parameters[0].value.type = rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER;
+      request2->parameters[0].value.integer_value = 1;
+      client_set_parameters_->async_send_request(request2);
+    }
 
     // create a thread that runs the optimization in a loop
     // This replaces in my understanding the SequenceControllerExperiment class
@@ -127,7 +140,6 @@ private:
 
     auto now = this->now();
     double ctrl_time = (now - start_time).seconds();
-    std::cout << "t= " << ctrl_time << std::endl;
 
     // do nothing, if RAI isn't ready, yet
     if (!ex || !ex->bot) {
@@ -151,24 +163,33 @@ private:
     
     // skip, if there is no valid spline
     if (ex->bot->getTimeToEnd()<=0.) {
+      std::cout << "warning! time-to-end negative: " << ex->bot->getTimeToEnd() << std::endl;
       return;
     }
 
     // Land, if the KOMO thread was exited
     if (done_) {
       std::cout << "Landing!" << std::endl;
-#ifndef DISPLAY_ONLY
-      auto request1 = std::make_shared<NotifySetpointsStop::Request>();
-      request1->remain_valid_millisecs = 100;
-      request1->group_mask = 0;
-      client_notify_setpoints_stop_->async_send_request(request1);
 
-      auto request2 = std::make_shared<Land::Request>();
-      request2->group_mask = 0;
-      request2->height = 0.0;
-      request2->duration = rclcpp::Duration::from_seconds(3.5);
-      client_land_->async_send_request(request2);
-#endif
+      if (!display_only_) {
+        auto request0 = std::make_shared<SetParameters::Request>();
+        request0->parameters.resize(1);
+        request0->parameters[0].name = "cf3/params/usd/logging";
+        request0->parameters[0].value.type = rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER;
+        request0->parameters[0].value.integer_value = 0;
+        client_set_parameters_->async_send_request(request0);
+
+        auto request1 = std::make_shared<NotifySetpointsStop::Request>();
+        request1->remain_valid_millisecs = 100;
+        request1->group_mask = 0;
+        client_notify_setpoints_stop_->async_send_request(request1);
+
+        auto request2 = std::make_shared<Land::Request>();
+        request2->group_mask = 0;
+        request2->height = 0.0;
+        request2->duration = rclcpp::Duration::from_seconds(3.5);
+        client_land_->async_send_request(request2);
+      }
 
       timer_->cancel();
       return;
@@ -198,10 +219,12 @@ private:
     msg.twist.angular.x    = 0;
     msg.twist.angular.y    = 0;
     msg.twist.angular.z    = 0;
-#ifndef DISPLAY_ONLY
-    pub_full_state_->publish(msg);
-#endif
+    if (!display_only_) {
+      pub_full_state_->publish(msg);
+    }
   }
+
+  bool display_only_;
 
   std::unique_ptr<SecMPC_Experiments> ex;
   
@@ -210,6 +233,7 @@ private:
   rclcpp::Client<Takeoff>::SharedPtr client_takeoff_;
   rclcpp::Client<Land>::SharedPtr client_land_;
   rclcpp::Client<NotifySetpointsStop>::SharedPtr client_notify_setpoints_stop_;
+  rclcpp::Client<SetParameters>::SharedPtr client_set_parameters_;
   rclcpp::TimerBase::SharedPtr timer_;
   std::thread rai_thread_;
   bool done_;
@@ -240,7 +264,7 @@ int main(int argc, char *argv[])
   //  rnd.clockSeed();
   rnd.seed(1);
 
-  rclcpp::spin(std::make_shared<DemoNode>());
+  rclcpp::spin(std::make_shared<DemoNode>(argc > 1));
   rclcpp::shutdown();
 
   LOG(0) << " === bye bye ===\n used parameters:\n"
