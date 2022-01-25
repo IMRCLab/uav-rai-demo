@@ -19,7 +19,7 @@ Note: symlink-install allows you to edit Python and config files without running
 In a separate terminal:
 ```
 . install/local_setup.zsh (OR . install/local_setup.bash)
-ros2 launch crazyswarm2 launch.py
+ros2 launch uav-rai-demo launch.py
 ```
 
 In a separate terminal:
