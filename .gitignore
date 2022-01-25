@@ -11,3 +11,5 @@ vc60.idb
 .*.includes
 .*.cflags
 .*.cxxflags
+
+*/build
