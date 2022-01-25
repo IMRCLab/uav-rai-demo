@@ -48,30 +48,25 @@ public:
     sub_poses_=this->create_subscription<NamedPoseArray>(
         "poses", 1, std::bind(&DemoNode::posesChanged, this, _1));
 
-    pub_full_state_ = this->create_publisher<FullState>("cf3/cmd_full_state", 10);
-
-    client_takeoff_ = this->create_client<Takeoff>("cf3/takeoff");
-    client_takeoff_->wait_for_service();
-
-    client_land_ = this->create_client<Land>("cf3/land");
-    client_land_->wait_for_service();
-
-    client_notify_setpoints_stop_ = this->create_client<NotifySetpointsStop>("cf3/notify_setpoints_stop");
-    client_notify_setpoints_stop_->wait_for_service();
-
-    client_set_parameters_ = this->create_client<SetParameters>("crazyswarm2_server/set_parameters");
-    client_set_parameters_->wait_for_service();
-
     q_real_ = zeros(3);
     qDot_real_ = zeros(3);
     done_ = false;
 
-    this->declare_parameter<int>("control_frequency", 100);
-    int f = this->get_parameter("control_frequency").as_int();
-
-    timer_ = this->create_wall_timer(std::chrono::milliseconds(1000 / f), std::bind(&DemoNode::control_loop, this));
-
     if (!display_only_) {
+      pub_full_state_ = this->create_publisher<FullState>("cf3/cmd_full_state", 10);
+
+      client_takeoff_ = this->create_client<Takeoff>("cf3/takeoff");
+      client_takeoff_->wait_for_service();
+
+      client_land_ = this->create_client<Land>("cf3/land");
+      client_land_->wait_for_service();
+
+      client_notify_setpoints_stop_ = this->create_client<NotifySetpointsStop>("cf3/notify_setpoints_stop");
+      client_notify_setpoints_stop_->wait_for_service();
+
+      client_set_parameters_ = this->create_client<SetParameters>("crazyswarm2_server/set_parameters");
+      client_set_parameters_->wait_for_service();
+
       // Takeoff!
       auto request = std::make_shared<Takeoff::Request>();
       request->group_mask = 0;
@@ -87,6 +82,11 @@ public:
       request2->parameters[0].value.integer_value = 1;
       client_set_parameters_->async_send_request(request2);
     }
+
+    this->declare_parameter<int>("control_frequency", 100);
+    int f = this->get_parameter("control_frequency").as_int();
+
+    timer_ = this->create_wall_timer(std::chrono::milliseconds(1000 / f), std::bind(&DemoNode::control_loop, this));
 
     // create a thread that runs the optimization in a loop
     // This replaces in my understanding the SequenceControllerExperiment class
