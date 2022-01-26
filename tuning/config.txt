@@ -8,6 +8,9 @@ on:fixedFrequency
 stateEstimateZ.x
 stateEstimateZ.y
 stateEstimateZ.z
+stateEstimateZ.vx
+stateEstimateZ.vy
+stateEstimateZ.vz
 stateEstimateZ.quat
 ctrlMel.ep_x
 ctrlMel.ep_y
@@ -25,3 +28,10 @@ on:estPosition
 locSrv.x
 locSrv.y
 locSrv.z
+on:cmdFullState
+ctrltarget.x
+ctrltarget.y
+ctrltarget.z
+ctrltarget.vx
+ctrltarget.vy
+ctrltarget.vz

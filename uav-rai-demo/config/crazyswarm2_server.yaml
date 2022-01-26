@@ -7,7 +7,7 @@
         enHighLevel: 1
       stabilizer:
         estimator: 2 # 1: complementary, 2: kalman
-        controller: 2 # 1: PID, 2: mellinger
+        controller: 4 # 1: PID, 2: mellinger, 3: INDI, 4: SJC
       # ring:
       #   effect: 16 # 6: double spinner, 7: solid color, 16: packetRate
       #   solidBlue: 255 # if set to solid color
@@ -15,7 +15,7 @@
       #   solidRed: 0 # if set to solid color
       #   headlightEnable: 0
       locSrv:
-        extPosStdDev: 0.02
+        extPosStdDev: 0.005
         # extQuatStdDev: 0.5e-1
       # kalman:
       #   resetEstimation: 1

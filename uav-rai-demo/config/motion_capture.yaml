@@ -7,9 +7,9 @@
 
     marker_configurations:
       default_single_marker:
-        offset: [0.0, 0.0, 0.0]
+        offset: [0.0, 0.0, -0.02]
         points:
-          p0: [0.0,0.0,0.01]
+          p0: [0.0,0.0,0.0]
 
     dynamics_configurations:
       default:

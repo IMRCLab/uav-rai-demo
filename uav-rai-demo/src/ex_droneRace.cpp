@@ -29,24 +29,24 @@ void ex_droneRace(std::unique_ptr<SecMPC_Experiments>& ex){
 #else
   KOMO komo;
   komo.setModel(C, false);
-  komo.setTiming(8., 1, 5., 1);
+  komo.setTiming(7., 1, 5., 1);
   komo.add_qControlObjective({}, 1, 1e-1);
-  komo.addObjective({1.}, FS_positionDiff, {"drone", "target0_before"}, OT_eq, {1e1});
-  komo.addObjective({2.}, FS_positionDiff, {"drone", "target0"}, OT_eq, {1e1});
-  komo.addObjective({3.}, FS_positionDiff, {"drone", "target1"}, OT_eq, {1e1});
-  komo.addObjective({4.}, FS_positionDiff, {"drone", "target2"}, OT_eq, {1e1});
-  komo.addObjective({5.}, FS_positionDiff, {"drone", "target3"}, OT_eq, {1e1});
-  komo.addObjective({6.}, FS_positionDiff, {"drone", "target0"}, OT_eq, {1e1});
-  komo.addObjective({7.}, FS_positionDiff, {"drone", "target1"}, OT_eq, {1e1});
-  komo.addObjective({8.}, FS_position, {"drone"}, OT_eq, {1e1}, {0,-.5, 1.});
+  // komo.addObjective({1.}, FS_positionDiff, {"drone", "target0_before"}, OT_eq, {1e1});
+  komo.addObjective({1.}, FS_positionDiff, {"drone", "target0_shift"}, OT_eq, {1e1});
+  komo.addObjective({2.}, FS_positionDiff, {"drone", "target1_shift"}, OT_eq, {1e1});
+  komo.addObjective({3.}, FS_positionDiff, {"drone", "target2_shift"}, OT_eq, {1e1});
+  komo.addObjective({4.}, FS_positionDiff, {"drone", "target3_shift"}, OT_eq, {1e1});
+  komo.addObjective({5.}, FS_positionDiff, {"drone", "target0_shift"}, OT_eq, {1e1});
+  komo.addObjective({6.}, FS_positionDiff, {"drone", "target1_shift"}, OT_eq, {1e1});
+  komo.addObjective({7.}, FS_position, {"drone"}, OT_eq, {1e1}, {0,-.5, 1.});
 #endif
 
   arrA targetCen(4), targetVel(4);
 
-  ex = std::make_unique<SecMPC_Experiments>(C, komo, .1, 1e0, 0.5, false); //LAST ARGUMENT: NO AUTO-TANGENTS!
+  ex = std::make_unique<SecMPC_Experiments>(C, komo, .1, 1e0, 1, false); //LAST ARGUMENT: NO AUTO-TANGENTS!
 
   ex->step();
-  ex->mpc->tauCutoff = .1;
+  ex->mpc->tauCutoff = .5;
 #if 0 //possibility to hard-code the tangents (requires true above) - but much less dynamic
   arr& T=ex->mpc->timingMPC.tangents;
   T.resize(komo.T-1, 3);
@@ -58,8 +58,8 @@ void ex_droneRace(std::unique_ptr<SecMPC_Experiments>& ex){
 #endif
 
   while(ex->step()){
-    if(ex->mpc->timingMPC.phase==5){ //hard code endless loop by phase backtracking
-      ex->mpc->timingMPC.update_setPhase(1);
+    if(ex->mpc->timingMPC.phase==4){ //hard code endless loop by phase backtracking
+      ex->mpc->timingMPC.update_setPhase(0);
     }
 
     //simulate wiggling the gates

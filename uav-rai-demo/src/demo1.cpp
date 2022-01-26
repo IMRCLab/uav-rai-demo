@@ -83,7 +83,7 @@ public:
       client_set_parameters_->async_send_request(request2);
     }
 
-    this->declare_parameter<int>("control_frequency", 100);
+    this->declare_parameter<int>("control_frequency", 200);
     int f = this->get_parameter("control_frequency").as_int();
 
     timer_ = this->create_wall_timer(std::chrono::milliseconds(1000 / f), std::bind(&DemoNode::control_loop, this));

@@ -62,9 +62,9 @@ if __name__ == '__main__':
     ax[0,0].plot(time_fF, pos_ekf[:,0], label='EKF')
     ax[0,0].scatter(time_eP, pos_mocap[:,0], label='mocap')
     ax[0,1].plot(time_fF, pos_ekf[:,1], label='EKF')
-    ax[0,0].scatter(time_eP, pos_mocap[:,1], label='mocap')
+    ax[0,1].scatter(time_eP, pos_mocap[:,1], label='mocap')
     ax[0,2].plot(time_fF, pos_ekf[:,2], label='EKF')
-    ax[0,0].scatter(time_eP, pos_mocap[:,2], label='mocap')
+    ax[0,2].scatter(time_eP, pos_mocap[:,2], label='mocap')
     ax[0,0].set_ylabel('Position [m]')
 
     ax[1,0].plot(time_fF, ep[:,0], label='ep.x')
