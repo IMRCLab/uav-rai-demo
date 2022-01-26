@@ -1,0 +1,37 @@
+1     # version
+512   # buffer size in bytes
+log   # file name
+0     # enable on startup (0/1)
+on:fixedFrequency
+100     # frequency
+1     # mode (0: disabled, 1: synchronous stabilizer, 2: asynchronous)
+stateEstimateZ.x
+stateEstimateZ.y
+stateEstimateZ.z
+stateEstimateZ.vx
+stateEstimateZ.vy
+stateEstimateZ.vz
+stateEstimateZ.quat
+ctrlMel.ep_x
+ctrlMel.ep_y
+ctrlMel.ep_z
+ctrlMel.ev_x
+ctrlMel.ev_y
+ctrlMel.ev_z
+ctrlMel.eR_x
+ctrlMel.eR_y
+ctrlMel.eR_z
+ctrlMel.ew_x
+ctrlMel.ew_y
+ctrlMel.ew_z
+on:estPosition
+locSrv.x
+locSrv.y
+locSrv.z
+on:cmdFullState
+ctrltarget.x
+ctrltarget.y
+ctrltarget.z
+ctrltarget.vx
+ctrltarget.vy
+ctrltarget.vz

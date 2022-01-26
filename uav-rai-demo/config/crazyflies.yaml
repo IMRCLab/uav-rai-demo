@@ -1,0 +1,7 @@
+cf3:
+  initial_position:
+  - 0
+  - 0
+  - 0
+  type: cf21
+  uri: radio://0/80/2M/E7E7E7E703
